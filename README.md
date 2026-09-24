@@ -18,3 +18,5 @@ The canonical protocol is documented in [`protocol/v1.md`](protocol/v1.md). Room
 ## Releases
 
 Put signed installers in `releases/` as `<version>/TextOnScreen_<version>_x64-setup.exe` and update `releases/latest.json`. The app reads `GET /api/v1/releases/latest`. The workflow in `.github/workflows/release.yml` builds a tagged app release and uploads it to the configured host.
+
+For HTTPS, WebSocket reverse proxying, process management, and edge protection, see [`docs/deployment.md`](docs/deployment.md).
