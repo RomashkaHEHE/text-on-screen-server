@@ -72,6 +72,7 @@ await app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
 await app.register(websocket);
 await app.register(fastifyStatic, { root: path.join(rootDir, "web"), prefix: "/" });
 await app.register(fastifyStatic, { root: releasesDir, prefix: "/downloads/", decorateReply: false, wildcard: true });
+app.get("/downloads/", async (_request, reply) => reply.sendFile("downloads/index.html"));
 
 app.get("/health", async () => ({ ok: true, service: "text-on-screen-server", protocolVersion }));
 app.get("/api/v1/version", async () => ({
