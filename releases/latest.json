@@ -5,7 +5,7 @@
   "platforms": {
     "windows-x86_64": {
       "url": "/downloads/0.1.0/TextOnScreen_0.1.0_x64-setup.exe",
-      "signature": "REPLACE_WITH_TAURI_SIGNATURE"
+      "signature": ""
     }
   }
 }
