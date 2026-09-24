@@ -36,7 +36,10 @@ type Room = {
 
 const rooms = new Map<string, Room>();
 const sessionSchema = z.object({ title: z.string().trim().max(120).optional() });
-const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
+const app = Fastify({ logger: {
+  level: process.env.LOG_LEVEL ?? "info",
+  serializers: { req: (request) => ({ method: request.method, url: request.url?.split("?")[0], remoteAddress: request.ip }) }
+} });
 
 function jsonMessage(value: unknown): string {
   return JSON.stringify(value);
@@ -87,6 +90,9 @@ app.get("/api/v1/releases/latest", async (_request, reply) => {
   if (!existsSync(latestPath)) return reply.code(404).send({ error: "release_not_found" });
   try {
     const release = JSON.parse(readFileSync(latestPath, "utf8")) as Record<string, unknown>;
+    const installerUrl = (release.platforms as any)?.["windows-x86_64"]?.url;
+    const installerPath = typeof installerUrl === "string" ? path.resolve(releasesDir, installerUrl.replace(/^\/downloads\//, "")) : "";
+    if (!installerPath.startsWith(releasesDir + path.sep)) return reply.code(503).send({ error: "release_metadata_invalid" });
     return { ...release, protocolVersion, minimumClientVersion };
   } catch {
     return reply.code(503).send({ error: "release_metadata_invalid" });
@@ -94,6 +100,7 @@ app.get("/api/v1/releases/latest", async (_request, reply) => {
 });
 
 app.post("/api/v1/sessions", async (request, reply) => {
+  if (rooms.size >= 1000) return reply.code(503).send({ error: "room_capacity_reached" });
   const parsed = sessionSchema.safeParse(request.body ?? {});
   if (!parsed.success) return reply.code(400).send({ error: "invalid_request", details: parsed.error.flatten() });
   const id = nanoid(10);
@@ -138,12 +145,18 @@ app.route({
     const role: Role | undefined = token === room.editorToken ? "editor" : token === room.viewerToken ? "viewer" : undefined;
     if (!role) { socket.close(1008, "invalid_token"); return; }
     if (!Number.isFinite(clientProtocol) || clientProtocol < minimumProtocolVersion) { socket.close(1008, "protocol_update_required"); return; }
+    if (room.sockets.size >= 20) { socket.close(1013, "room_full"); return; }
     room.sockets.set(socket, role);
     room.lastActivityAt = new Date().toISOString();
     send(socket, { type: "hello", protocolVersion, minimumProtocolVersion, minimumClientVersion, sessionId: room.id, role });
     send(socket, { type: "sync", update: toBase64(Y.encodeStateAsUpdate(room.doc)) });
 
+    let windowStart = Date.now();
+    let messagesInWindow = 0;
     socket.on("message", (raw: Buffer) => {
+      const now = Date.now();
+      if (now - windowStart >= 1000) { windowStart = now; messagesInWindow = 0; }
+      if (++messagesInWindow > 30) { socket.close(1008, "rate_limited"); return; }
       if (raw.byteLength > maxMessageBytes) { send(socket, { type: "error", code: "message_too_large" }); return; }
       let message: any;
       try { message = JSON.parse(raw.toString("utf8")); } catch { send(socket, { type: "error", code: "invalid_json" }); return; }
@@ -152,6 +165,10 @@ app.route({
         const update = fromBase64(message.update);
         if (!update) { send(socket, { type: "error", code: "invalid_update" }); return; }
         try {
+          const trial = new Y.Doc();
+          Y.applyUpdate(trial, Y.encodeStateAsUpdate(room.doc));
+          Y.applyUpdate(trial, update);
+          if (trial.getText("text").length > 100_000) { send(socket, { type: "error", code: "text_too_large" }); return; }
           Y.applyUpdate(room.doc, update);
           room.lastActivityAt = new Date().toISOString();
           broadcast(room, { type: "sync", update: toBase64(update) }, socket);
