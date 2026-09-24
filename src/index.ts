@@ -20,6 +20,7 @@ const protocolVersion = 1;
 const minimumClientVersion = process.env.MINIMUM_CLIENT_VERSION ?? "0.1.0";
 const minimumProtocolVersion = Number(process.env.MINIMUM_PROTOCOL_VERSION ?? 1);
 const maxMessageBytes = 256 * 1024;
+const roomTtlMs = 6 * 60 * 60 * 1000;
 
 type Role = "editor" | "viewer";
 type Room = {
@@ -57,6 +58,14 @@ function broadcast(room: Room, value: unknown, except?: WebSocket): void {
     if (socket !== except && socket.readyState === WebSocket.OPEN) socket.send(message);
   }
 }
+
+const roomCleanup = setInterval(() => {
+  const cutoff = Date.now() - roomTtlMs;
+  for (const [id, room] of rooms) {
+    if (room.sockets.size === 0 && Date.parse(room.lastActivityAt) < cutoff) rooms.delete(id);
+  }
+}, 10 * 60 * 1000);
+roomCleanup.unref();
 
 await app.register(cors, { origin: true });
 await app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
